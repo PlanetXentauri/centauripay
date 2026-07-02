@@ -82,6 +82,16 @@
     font-size: 11px; color: var(--text-dim);
   }
   .sync-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-faint); }
+  .settings-btn {
+    background: var(--panel); border: 1px solid var(--panel-border);
+    border-radius: 999px; padding: 6px 10px; font-size: 16px;
+    line-height: 1; margin-left: 8px;
+    transition: background 0.15s, border-color 0.15s;
+  }
+  .settings-btn:hover { border-color: var(--accent-1); }
+  .settings-btn.active {
+    background: rgba(255,255,255,0.10); border-color: rgba(255,255,255,0.30);
+  }
   .sync-dot.connected { background: var(--success); }
   .sync-dot.error { background: var(--danger); }
 
@@ -141,12 +151,13 @@
   /* ====== Family member pills ====== */
   nav.tabs.member-tabs { margin-bottom: 10px; }
   nav.tabs button.tab-member-all {
-    color: var(--text-dim); border-color: var(--panel-border);
-    background: var(--panel);
+    color: #c4b5fd; border-color: rgba(139,92,246,0.35);
+    background: rgba(139,92,246,0.06);
   }
   nav.tabs button.tab-member-all.active {
-    color: var(--text); background: rgba(255,255,255,0.10);
-    border-color: rgba(255,255,255,0.30);
+    color: #ede9fe; background: rgba(139,92,246,0.28);
+    border-color: rgba(139,92,246,0.75);
+    box-shadow: 0 0 0 1px rgba(139,92,246,0.25);
   }
   nav.tabs button.tab-m-dreco {
     color: #a5b4fc; border-color: rgba(99,102,241,0.30); background: rgba(99,102,241,0.06);
@@ -514,6 +525,7 @@
     <div class="sync-status">
       <span class="sync-dot" id="sync-dot"></span>
       <span id="sync-text">connecting…</span>
+      <button class="settings-btn" id="settings-btn" title="Settings">⚙️</button>
     </div>
   </header>
 
@@ -541,9 +553,7 @@
     <nav class="tabs" id="tabs">
       <button class="tab-today active" data-filter="today">☀️ Today</button>
       <button class="tab-upcoming" data-filter="upcoming">📆 Upcoming</button>
-      <button class="tab-all" data-filter="all">🌌 All</button>
       <button class="tab-done" data-filter="done">✅ Done</button>
-      <button class="tab-settings" data-filter="settings">⚙️ Settings</button>
     </nav>
 
     <div class="quick-add" id="quick-add">
@@ -566,9 +576,7 @@
     <nav class="tabs" id="bill-tabs">
       <button class="tab-today active" data-bill-filter="month">📅 This Month</button>
       <button class="tab-upcoming" data-bill-filter="upcoming">⏭️ Upcoming</button>
-      <button class="tab-all" data-bill-filter="all">💳 All</button>
       <button class="tab-done" data-bill-filter="paid">✅ Paid</button>
-      <button class="tab-settings" data-bill-filter="settings">⚙️ Settings</button>
     </nav>
 
     <div class="quick-add" id="bill-quick-add">
@@ -842,17 +850,13 @@ function filterTasks() {
   const today = todayISO();
   const in7 = addDaysISO(7);
   let list = tasks.filter(t => matchesMember(t));
+  const isToday = (t) => (t.deadline && t.deadline <= today) || t.priority === "P1";
   if (currentFilter === "today") {
-    return list.filter(t => t.status === "open" && (
-      (t.deadline && t.deadline <= today) ||
-      t.priority === "P1"
-    ));
+    return list.filter(t => t.status === "open" && isToday(t));
   }
   if (currentFilter === "upcoming") {
-    return list.filter(t => t.status === "open" && t.deadline && t.deadline > today && t.deadline <= in7);
-  }
-  if (currentFilter === "all") {
-    return list.filter(t => t.status === "open");
+    // Everything open that isn't due today — so nothing ever hides
+    return list.filter(t => t.status === "open" && !isToday(t));
   }
   if (currentFilter === "done") {
     return list.filter(t => t.status === "done");
@@ -868,6 +872,10 @@ function render() {
   // Member pills reflect state
   $$("#member-tabs button").forEach(b =>
     b.classList.toggle("active", b.dataset.member === memberFilter));
+
+  // Settings gear reflects state
+  $("#settings-btn").classList.toggle("active",
+    (mode === "bills" ? currentBillFilter : currentFilter) === "settings");
 
   if (mode === "bills") {
     $("#bills-mode").style.display = "block";
@@ -899,8 +907,7 @@ function renderTasks() {
     const who = memberFilter === "all" ? "" : ` for ${memberFilter}`;
     const empty = {
       today: { e: "✨", m: `Nothing for today${who}. Add one above.` },
-      upcoming: { e: "📅", m: `Nothing coming up in the next 7 days${who}.` },
-      all: { e: "🎉", m: `Inbox zero${who}. Add a task above.` },
+      upcoming: { e: "🎉", m: `Nothing else coming up${who}. Add a task above.` },
       done: { e: "📥", m: `No completed tasks yet${who}.` }
     }[currentFilter];
     root.innerHTML = `<div class="empty-state"><div class="emoji">${empty.e}</div><div>${empty.m}</div></div>`;
@@ -1396,10 +1403,8 @@ function filterBills() {
     return list.filter(b => b.status !== "paid" && (!b.dueDate || b.dueDate <= monthEnd));
   }
   if (currentBillFilter === "upcoming") {
-    return list.filter(b => b.status !== "paid" && b.dueDate && b.dueDate > monthEnd && b.dueDate <= in30);
-  }
-  if (currentBillFilter === "all") {
-    return list.filter(b => b.status !== "paid");
+    // Every unpaid bill beyond this month — so nothing ever hides
+    return list.filter(b => b.status !== "paid" && b.dueDate && b.dueDate > monthEnd);
   }
   if (currentBillFilter === "paid") {
     return list.filter(b => b.status === "paid");
@@ -1441,9 +1446,8 @@ function renderBills() {
   if (list.length === 0) {
     const who = memberFilter === "all" ? "" : ` for ${memberFilter}`;
     const empty = {
-      month: { e: "💸", m: `No bills due this month${who}.` },
-      upcoming: { e: "📅", m: `Nothing coming up${who}.` },
-      all: { e: "🎉", m: `No open bills${who}. Add one above.` },
+      month: { e: "💸", m: `No bills due this month${who}. Add one above.` },
+      upcoming: { e: "📅", m: `Nothing coming up after this month${who}.` },
       paid: { e: "✅", m: `No paid bills yet${who}.` }
     }[currentBillFilter];
     root.innerHTML = `<div class="empty-state"><div class="emoji">${empty.e}</div><div>${empty.m}</div></div>`;
@@ -1722,6 +1726,18 @@ $$("#bill-tabs button").forEach(btn => {
     render();
   };
 });
+
+// Settings gear (top corner) — toggles settings for the current mode
+$("#settings-btn").onclick = () => {
+  if (mode === "bills") {
+    currentBillFilter = currentBillFilter === "settings" ? "month" : "settings";
+    $$("#bill-tabs button").forEach(b => b.classList.toggle("active", b.dataset.billFilter === currentBillFilter));
+  } else {
+    currentFilter = currentFilter === "settings" ? "today" : "settings";
+    $$("#tabs button").forEach(b => b.classList.toggle("active", b.dataset.filter === currentFilter));
+  }
+  render();
+};
 
 // Quick add — tasks
 $("#qa-add").onclick = () => { addTask($("#qa-title").value); $("#qa-title").value = ""; };

@@ -298,6 +298,24 @@
     text-decoration: none;
   }
   .link-row a:hover { text-decoration: underline; }
+  .link-block { display: flex; flex-direction: column; gap: 2px; }
+  .link-logo {
+    width: 26px; height: 26px; border-radius: 6px; flex-shrink: 0;
+    background: var(--panel-2); object-fit: contain; padding: 2px;
+  }
+  .link-logo-empty {
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 13px;
+  }
+  .link-info {
+    display: flex; flex-wrap: wrap; gap: 2px 14px;
+    font-size: 12px; color: var(--text-dim);
+    padding: 2px 2px 6px 34px;
+  }
+  .link-info a { color: var(--accent-1); text-decoration: none; }
+  .link-info a:hover { text-decoration: underline; }
+  .link-info-name { color: var(--text); font-weight: 600; }
+  .link-info-desc { flex-basis: 100%; color: var(--text-faint); }
 
   /* Action buttons */
   .action-row { display: flex; gap: 8px; justify-content: flex-end; }
@@ -980,14 +998,7 @@ function detailsHtml(t) {
     </div>
   `).join("");
 
-  const linksHtml = (t.links || []).map((l, i) => `
-    <div class="link-row" data-link-idx="${i}">
-      <input type="text" placeholder="Label" value="${escapeHtml(l.label || "")}" data-action="edit-link-label" />
-      <input type="url" placeholder="https://…" value="${escapeHtml(l.url || "")}" data-action="edit-link-url" />
-      ${l.url ? `<a href="${escapeHtml(l.url)}" target="_blank" rel="noopener">↗</a>` : ""}
-      <button class="icon-btn danger" data-action="del-link">×</button>
-    </div>
-  `).join("");
+  const linksHtml = (t.links || []).map((l, i) => linkBlockHtml(l, i)).join("");
 
   return `
     <div class="task-details">
@@ -1101,6 +1112,7 @@ function bindTaskEvents(t) {
       const links = [...(t.links || [])];
       links[idx] = { ...links[idx], url: el.value };
       updateTask(t.id, { links });
+      enrichLinkAt("task", t.id, idx, el.value.trim());
     };
     if (action === "del-link") el.onclick = () => {
       const idx = parseInt(el.closest("[data-link-idx]").dataset.linkIdx);
@@ -1310,6 +1322,77 @@ async function lookupCompany(rawUrl) {
   return result;
 }
 
+// ----- Link enrichment: every added link gets a logo + contact info -----
+function faviconFor(url) {
+  const domain = extractDomain(url || "");
+  return domain ? ("https://www.google.com/s2/favicons?sz=128&domain=" + domain) : "";
+}
+
+function linkBlockHtml(l, i) {
+  const logo = l.logoUrl || faviconFor(l.url);
+  const spinner = l.lookupStatus === "pending" ? `<span class="lookup-spinner" title="Looking up info…"></span>` : "";
+  const bits = [];
+  if (l.name) bits.push(`<span class="link-info-name">${escapeHtml(l.name)}</span>`);
+  if (l.phone) bits.push(`<span>📞 <a href="tel:${escapeHtml(l.phone)}">${escapeHtml(l.phone)}</a></span>`);
+  if (l.email) bits.push(`<span>✉️ <a href="mailto:${escapeHtml(l.email)}">${escapeHtml(l.email)}</a></span>`);
+  if (l.address) bits.push(`<span>📍 ${escapeHtml(l.address)}</span>`);
+  if (l.description) bits.push(`<span class="link-info-desc">${escapeHtml(l.description)}</span>`);
+  return `
+    <div class="link-block" data-link-idx="${i}">
+      <div class="link-row">
+        ${logo ? `<img class="link-logo" src="${escapeHtml(logo)}" alt="" onerror="this.style.visibility='hidden'"/>` : `<span class="link-logo link-logo-empty">🔗</span>`}
+        <input type="text" placeholder="Label" value="${escapeHtml(l.label || "")}" data-action="edit-link-label" />
+        <input type="url" placeholder="https://…" value="${escapeHtml(l.url || "")}" data-action="edit-link-url" />
+        ${l.url ? `<a href="${escapeHtml(l.url)}" target="_blank" rel="noopener">↗</a>` : ""}
+        ${spinner}
+        <button class="icon-btn danger" data-action="del-link">×</button>
+      </div>
+      ${bits.length ? `<div class="link-info">${bits.join("")}</div>` : ""}
+    </div>`;
+}
+
+function patchLink(kind, id, idx, url, patch) {
+  const item = (kind === "bill" ? bills : tasks).find(x => x.id === id);
+  if (!item) return;
+  const links = [...(item.links || [])];
+  if (!links[idx] || links[idx].url !== url) return; // link changed meanwhile
+  links[idx] = { ...links[idx], ...patch };
+  if (kind === "bill") updateBill(id, { links }); else updateTask(id, { links });
+}
+
+async function enrichLinkAt(kind, id, idx, url) {
+  if (!url || !extractDomain(url)) return;
+  patchLink(kind, id, idx, url, { logoUrl: faviconFor(url), lookupStatus: "pending" });
+  try {
+    const info = await lookupCompany(url);
+    patchLink(kind, id, idx, url, {
+      logoUrl: info.logoUrl || faviconFor(url),
+      name: info.name || "",
+      phone: info.phone || "",
+      email: info.email || "",
+      address: info.address || "",
+      description: info.description || "",
+      lookupStatus: "done"
+    });
+  } catch (e) {
+    patchLink(kind, id, idx, url, { lookupStatus: "failed" });
+  }
+}
+
+function enrichedLinkFromInfo(url, info) {
+  return {
+    label: info.name || "Shared link",
+    url,
+    logoUrl: info.logoUrl || faviconFor(url),
+    name: info.name || "",
+    phone: info.phone || "",
+    email: info.email || "",
+    address: info.address || "",
+    description: info.description || "",
+    lookupStatus: "done"
+  };
+}
+
 // ----- Bill CRUD -----
 async function addBillFromInput(raw) {
   if (!raw || !raw.trim()) return;
@@ -1512,14 +1595,7 @@ function billDetailsHtml(b) {
   const freqOptions = ["once","weekly","monthly","quarterly","yearly"].map(f =>
     `<option value="${f}" ${f === (b.frequency || "monthly") ? "selected" : ""}>${f === "once" ? "One-off" : f.charAt(0).toUpperCase()+f.slice(1)}</option>`
   ).join("");
-  const linksHtml = (b.links || []).map((l, i) => `
-    <div class="link-row" data-link-idx="${i}">
-      <input type="text" placeholder="Label" value="${escapeHtml(l.label || "")}" data-action="edit-link-label" />
-      <input type="url" placeholder="https://…" value="${escapeHtml(l.url || "")}" data-action="edit-link-url" />
-      ${l.url ? `<a href="${escapeHtml(l.url)}" target="_blank" rel="noopener">↗</a>` : ""}
-      <button class="icon-btn danger" data-action="del-link">×</button>
-    </div>
-  `).join("");
+  const linksHtml = (b.links || []).map((l, i) => linkBlockHtml(l, i)).join("");
   return `
     <div class="bill-details">
       <div class="field-row">
@@ -1621,6 +1697,7 @@ function bindBillEvents(b) {
       const i = parseInt(el.closest("[data-link-idx]").dataset.linkIdx);
       const links = [...(b.links || [])]; links[i] = { ...links[i], url: el.value };
       updateBill(b.id, { links });
+      enrichLinkAt("bill", b.id, i, el.value.trim());
     };
     if (action === "del-link") el.onclick = () => {
       const i = parseInt(el.closest("[data-link-idx]").dataset.linkIdx);
@@ -1903,7 +1980,7 @@ async function submitShareAdd() {
         dueDate: get("due").value || null,
         status: "open",
         accountNumber: "", phone: "", email: "", address: "", description: "", notes: "",
-        links: s.url ? [{ label: "Shared link", url: s.url }] : [],
+        links: s.url ? [{ label: "Shared link", url: s.url, logoUrl: faviconFor(s.url) }] : [],
         lookupStatus: domain ? "pending" : "",
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp()
@@ -1916,6 +1993,7 @@ async function submitShareAdd() {
           if (info.phone) patch.phone = info.phone;
           if (info.email) patch.email = info.email;
           if (info.address) patch.address = info.address;
+          patch.links = [enrichedLinkFromInfo(s.url, info)];
           try { await updateDoc(doc(db, COL_BILLS, ref.id), patch); } catch (e) {}
         }).catch(() => {
           try { updateDoc(doc(db, COL_BILLS, ref.id), { lookupStatus: "failed" }); } catch (e) {}
@@ -1923,7 +2001,7 @@ async function submitShareAdd() {
       }
       mode = "bills";
     } else {
-      await addDoc(collection(db, COL_TASKS), {
+      const tref = await addDoc(collection(db, COL_TASKS), {
         title,
         assignee: s.owner,
         forWhom,
@@ -1932,11 +2010,16 @@ async function submitShareAdd() {
         deadline: get("due").value || null,
         status: "open",
         notes: "",
-        links: s.url ? [{ label: "Shared link", url: s.url }] : [],
+        links: s.url ? [{ label: "Shared link", url: s.url, logoUrl: faviconFor(s.url) }] : [],
         subtasks: [],
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp()
       });
+      if (s.url && extractDomain(s.url)) {
+        lookupCompany(s.url).then(async (info) => {
+          try { await updateDoc(doc(db, COL_TASKS, tref.id), { links: [enrichedLinkFromInfo(s.url, info)] }); } catch (e) {}
+        }).catch(() => {});
+      }
       mode = "todo";
     }
     localStorage.setItem("cp-mode", mode);

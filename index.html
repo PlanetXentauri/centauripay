@@ -500,6 +500,63 @@
   .share-opt:hover { border-color: var(--accent-1); background: rgba(99,102,241,0.08); }
   .share-step-dots { font-size: 11px; color: var(--text-faint); letter-spacing: 0.06em; }
 
+  /* ====== Bill calendar ====== */
+  .bill-cal {
+    background: var(--panel); border: 1px solid var(--panel-border);
+    border-radius: 14px; padding: 14px; margin: 16px 0;
+  }
+  .bill-cal-head {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 10px; gap: 8px;
+  }
+  .bill-cal-title {
+    font-weight: 700; font-size: 14px; letter-spacing: 0.05em;
+    text-transform: uppercase; color: var(--text-dim);
+  }
+  .cal-nav-btn { padding: 4px 12px; font-size: 15px; line-height: 1.2; }
+  .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+  .cal-dow {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--text-faint); text-align: center; padding: 2px 0; font-weight: 700;
+  }
+  .cal-day {
+    min-height: 58px; background: var(--panel-2);
+    border: 1px solid var(--panel-border); border-radius: 8px;
+    padding: 3px 4px; display: flex; flex-direction: column; gap: 2px;
+    overflow: hidden;
+  }
+  .cal-day.other { background: transparent; border-color: transparent; }
+  .cal-day.today {
+    border-color: var(--accent-1);
+    box-shadow: 0 0 0 1px rgba(99,102,241,0.35);
+  }
+  .cal-daynum { font-size: 10px; color: var(--text-dim); font-weight: 600; }
+  .cal-day.today .cal-daynum { color: #a5b4fc; }
+  .cal-bill {
+    display: flex; align-items: center; gap: 3px;
+    font-size: 10px; font-weight: 700; border-radius: 5px;
+    padding: 1px 4px; cursor: pointer; border: 1px solid transparent;
+    overflow: hidden; white-space: nowrap;
+  }
+  .cal-bill img {
+    width: 13px; height: 13px; border-radius: 3px;
+    object-fit: contain; flex-shrink: 0; background: rgba(255,255,255,0.08);
+  }
+  .cal-bill.s-paid { background: rgba(74,222,128,0.18); color: #86efac; border-color: rgba(74,222,128,0.45); }
+  .cal-bill.s-due { background: rgba(212,165,93,0.18); color: #fde68a; border-color: rgba(212,165,93,0.45); }
+  .cal-bill.s-overdue { background: rgba(239,68,68,0.20); color: #fca5a5; border-color: rgba(239,68,68,0.55); }
+  .cal-legend {
+    display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px;
+    align-items: center;
+  }
+  .cal-legend .cal-bill { cursor: default; font-size: 11px; padding: 2px 9px; }
+  @media (max-width: 540px) {
+    .cal-day { min-height: 46px; padding: 2px 3px; }
+    .cal-bill span { display: none; }   /* logos only on small screens */
+    .cal-bill { padding: 1px 2px; }
+    .cal-legend .cal-bill span { display: inline; }
+  }
+
   /* Toast */
   .toast {
     position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
@@ -603,6 +660,7 @@
     </div>
 
     <div id="bills-list"></div>
+    <div id="bill-calendar"></div>
     <div id="bills-settings-view" style="display:none"></div>
   </div>
 </div>
@@ -1513,14 +1571,85 @@ function renderBillsView() {
   if (currentBillFilter === "settings") {
     $("#bills-list").style.display = "none";
     $("#bill-quick-add").style.display = "none";
+    $("#bill-calendar").style.display = "none";
     $("#bills-settings-view").style.display = "block";
     renderBillsSettings();
   } else {
     $("#bills-list").style.display = "block";
     $("#bill-quick-add").style.display = "flex";
+    $("#bill-calendar").style.display = "block";
     $("#bills-settings-view").style.display = "none";
     renderBills();
+    renderBillCalendar();
   }
+}
+
+// ----- Bill calendar: full month view, auto-synced with the list -----
+let calYear = null, calMonth = null;
+function renderBillCalendar() {
+  const root = $("#bill-calendar");
+  if (!root) return;
+  const now = new Date();
+  if (calYear === null) { calYear = now.getFullYear(); calMonth = now.getMonth(); }
+  const first = new Date(calYear, calMonth, 1);
+  const startDow = first.getDay();
+  const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
+  const today = todayISO();
+  const monthName = first.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+
+  const visible = bills.filter(b => matchesMember(b) && b.dueDate);
+  const byDate = {};
+  for (const b of visible) (byDate[b.dueDate] = byDate[b.dueDate] || []).push(b);
+
+  const dows = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+  let cells = dows.map(d => `<div class="cal-dow">${d}</div>`).join("");
+  for (let i = 0; i < startDow; i++) cells += `<div class="cal-day other"></div>`;
+  for (let d = 1; d <= daysInMonth; d++) {
+    const iso = `${calYear}-${String(calMonth + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+    const chips = (byDate[iso] || []).map(b => {
+      const isPaid = b.status === "paid";
+      const st = isPaid ? "s-paid" : (b.dueDate < today ? "s-overdue" : "s-due");
+      const label = isPaid ? "Paid ✓" : (b.dueDate < today ? "Overdue" : "Not paid yet");
+      const amt = (Number(b.amount) || 0);
+      const logo = b.logoUrl
+        ? `<img src="${escapeHtml(b.logoUrl)}" alt="" onerror="this.remove()"/>`
+        : "";
+      return `<div class="cal-bill ${st}" data-cal-bill="${b.id}" title="${escapeHtml(b.company || "Bill")} — ${label} — $${amt.toFixed(2)}">${logo}<span>$${amt % 1 ? amt.toFixed(2) : amt.toFixed(0)}</span></div>`;
+    }).join("");
+    cells += `<div class="cal-day ${iso === today ? "today" : ""}"><span class="cal-daynum">${d}</span>${chips}</div>`;
+  }
+
+  root.innerHTML = `
+    <div class="bill-cal">
+      <div class="bill-cal-head">
+        <button class="btn cal-nav-btn" data-cal-nav="-1" title="Previous month">‹</button>
+        <span class="bill-cal-title">📅 ${monthName}</span>
+        <button class="btn cal-nav-btn" data-cal-nav="1" title="Next month">›</button>
+      </div>
+      <div class="cal-grid">${cells}</div>
+      <div class="cal-legend">
+        <span class="cal-bill s-paid"><span>✓ Paid</span></span>
+        <span class="cal-bill s-due"><span>⏳ Not paid yet</span></span>
+        <span class="cal-bill s-overdue"><span>⚠ Overdue</span></span>
+      </div>
+    </div>`;
+
+  root.querySelectorAll("[data-cal-nav]").forEach(btn => btn.onclick = () => {
+    calMonth += parseInt(btn.dataset.calNav);
+    if (calMonth < 0) { calMonth = 11; calYear--; }
+    if (calMonth > 11) { calMonth = 0; calYear++; }
+    renderBillCalendar();
+  });
+  // Tap a bill on the calendar → jump to it in the list, expanded
+  root.querySelectorAll("[data-cal-bill]").forEach(chip => chip.onclick = () => {
+    const b = bills.find(x => x.id === chip.dataset.calBill);
+    if (!b) return;
+    expandedBillId = b.id;
+    currentBillFilter = b.status === "paid" ? "paid"
+      : (b.dueDate && b.dueDate > lastDayOfMonth() ? "upcoming" : "month");
+    $$("#bill-tabs button").forEach(x => x.classList.toggle("active", x.dataset.billFilter === currentBillFilter));
+    render();
+  });
 }
 
 function renderBills() {

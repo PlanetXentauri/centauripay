@@ -614,7 +614,7 @@
     <button class="tab-member-all active" data-member="all">🌍 Planet Centauri</button>
     <button class="tab-m-dreco" data-member="Dreco">🪐 Dreco</button>
     <button class="tab-m-brittany" data-member="Brittany">🐻 Brittany</button>
-    <button class="tab-m-anabella" data-member="Anabella">🌸 Anabella</button>
+    <button class="tab-m-anabella" data-member="Annabella">🌸 Annabella</button>
     <button class="tab-m-orion" data-member="Orion">⭐ Orion</button>
   </nav>
 
@@ -680,12 +680,14 @@ const COL_BILL_CATS = "cp_bill_categories";
 const MEMBERS = [
   { name: "Dreco", emoji: "🪐", cls: "dreco" },
   { name: "Brittany", emoji: "🐻", cls: "brittany" },
-  { name: "Anabella", emoji: "🌸", cls: "anabella" },
+  { name: "Annabella", emoji: "🌸", cls: "anabella" },
   { name: "Orion", emoji: "⭐", cls: "orion" }
 ];
 // Parents own tasks & pay bills; the kids are who things are FOR.
 const PARENTS = ["Dreco", "Brittany"];
-function memberByName(n) { return MEMBERS.find(m => m.name === n); }
+// Legacy alias: anything saved with the old spelling still matches
+const fixSpelling = (n) => n === "Anabella" ? "Annabella" : n;
+function memberByName(n) { return MEMBERS.find(m => m.name === fixSpelling(n)); }
 function memberChip(name) {
   const m = memberByName(name);
   if (!m) return `<span class="member-chip mc-family">🌍 Planet Centauri</span>`;
@@ -706,6 +708,7 @@ function ownerOptions(selected) {
 }
 // "For" select: anyone in the family
 function forOptions(selected) {
+  selected = fixSpelling(selected);
   const opts = [`<option value="" ${!selected ? "selected" : ""}>🌍 Planet Centauri (everyone)</option>`];
   for (const m of MEMBERS) {
     opts.push(`<option value="${m.name}" ${m.name === selected ? "selected" : ""}>${m.emoji} ${m.name}</option>`);
@@ -717,7 +720,7 @@ function forOptions(selected) {
 // Untargeted family items show for everyone.
 function matchesMember(item) {
   if (memberFilter === "all") return true;
-  if (item.assignee === memberFilter || item.forWhom === memberFilter) return true;
+  if (fixSpelling(item.assignee) === memberFilter || fixSpelling(item.forWhom) === memberFilter) return true;
   return !item.assignee && !item.forWhom;
 }
 

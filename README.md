@@ -1,13 +1,13 @@
- # CentauriPay 🪐   
+# CentauriPay 🪐
 
-The Centauri family's shared **To-Do & To-Pay** list — Dreco, Brittany (Mama Bear), Anabella & Orion. Same design as [GSD](https://planetxentauri.github.io/to-do-list/), built for the whole family.
+The Centauri family's shared **To-Do & To-Pay** list — Dreco, Brittany (Mama Bear), Annabella & Orion. Same design as [GSD](https://planetxentauri.github.io/to-do-list/), built for the whole family.
 
 ## What's different from GSD
 
-- **Family member pills** at the top — filter everything by Dreco 🪐, Brittany 🐻, Anabella 🌸, or Orion ⭐
+- **Family member pills** at the top — filter everything by Dreco 🪐, Brittany 🐻, Annabella 🌸, or Orion ⭐
 - **Assign tasks and bills** to a member, or leave them as **Family** so they show for everyone
 - Adding an item while a member pill is selected auto-assigns it to them
-- Uses the **same Firebase project** as GSD but its own `cp_` collections — the two apps never mix data, and sync works immediately with zero - Bills only — a dedicated To-Pay app with a monthly calendar
+- Uses the **same Firebase project** as GSD but its own `cp_` collections — the two apps never mix data, and sync works immediately with zero setup
 - To-Do + To-Pay only (no credit tracker)
 
 ## Deploy to GitHub Pages (5 minutes)

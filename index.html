@@ -9,7 +9,7 @@
 <meta name="apple-mobile-web-app-title" content="CentauriPay" />
 <link rel="manifest" href="manifest.json" />
 <link rel="apple-touch-icon" href="icon-192.png" />
-<title>CentauriPay — Centauri Family To-Do &amp; To-Pay</title>
+<title>CentauriPay — Centauri Family Bills</title>
 <style>
   :root {
     --bg-grad-start: #0b0d12;
@@ -595,7 +595,7 @@
   <header class="app-header">
     <div class="app-title-wrap">
       <img class="app-logo" id="app-title" src="logo.png" alt="CentauriPay" onerror="this.outerHTML='&lt;h1&gt;CentauriPay&lt;/h1&gt;'" />
-      <span class="tagline" id="app-tagline">Centauri Family · To-Do</span>
+      <span class="tagline" id="app-tagline">Centauri Family · Bills</span>
     </div>
     <div class="sync-status">
       <span class="sync-dot" id="sync-dot"></span>
@@ -609,11 +609,6 @@
     <p style="margin:0">Open <code>index.html</code> and paste your Firebase project's config into the <code>firebaseConfig</code> object near the bottom of the file.</p>
   </div>
 
-  <div class="mode-switch" id="mode-switch">
-    <button class="mode-btn active" data-mode="todo">📋 To-Do</button>
-    <button class="mode-btn" data-mode="bills">💵 To-Pay</button>
-  </div>
-
   <!-- Family member filter -->
   <nav class="tabs member-tabs" id="member-tabs">
     <button class="tab-member-all active" data-member="all">🌍 Planet Centauri</button>
@@ -623,25 +618,8 @@
     <button class="tab-m-orion" data-member="Orion">⭐ Orion</button>
   </nav>
 
-  <!-- ===== TO-DO MODE ===== -->
-  <div id="todo-mode">
-    <nav class="tabs" id="tabs">
-      <button class="tab-today active" data-filter="today">☀️ Today</button>
-      <button class="tab-upcoming" data-filter="upcoming">📆 Upcoming</button>
-      <button class="tab-done" data-filter="done">✅ Done</button>
-    </nav>
-
-    <div class="quick-add" id="quick-add">
-      <input id="qa-title" type="text" placeholder="Add a task and press Enter…" />
-      <button class="primary" id="qa-add">Add</button>
-    </div>
-
-    <div id="task-list"></div>
-    <div id="settings-view" style="display:none"></div>
-  </div>
-
-  <!-- ===== TO-PAY MODE ===== -->
-  <div id="bills-mode" style="display:none">
+  <!-- ===== TO-PAY (bills only) ===== -->
+  <div id="bills-mode">
     <div class="bill-summary" id="bill-summary">
       <span>Monthly burn: <strong id="bs-monthly">$0</strong></span>
       <span>Due this month: <strong id="bs-due-month">$0</strong></span>
@@ -767,7 +745,7 @@ const DEFAULT_BILL_CATEGORIES = [
 
 // ----- State -----
 let app, db;
-let mode = localStorage.getItem("cp-mode") || "todo";
+let mode = "bills"; // bills only — CentauriPay is dedicated to the family's bills
 let memberFilter = localStorage.getItem("cp-member") || "all";
 let tasks = [];
 let categories = [];
@@ -827,32 +805,6 @@ if (FIREBASE_CONFIGURED) {
 }
 
 function initSubscriptions() {
-  // Categories
-  const catsRef = collection(db, COL_CATS);
-  onSnapshot(catsRef, async (snap) => {
-    categories = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    if (categories.length === 0) {
-      for (const c of DEFAULT_CATEGORIES) {
-        await addDoc(catsRef, { ...c, parentId: null });
-      }
-    }
-    render();
-  }, (err) => {
-    setSyncStatus("error", "sync error");
-    toast("Categories sync error: " + err.message, true);
-  });
-
-  // Tasks
-  const tasksRef = query(collection(db, COL_TASKS), orderBy("createdAt", "desc"));
-  onSnapshot(tasksRef, (snap) => {
-    tasks = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    setSyncStatus("connected", "synced");
-    render();
-  }, (err) => {
-    setSyncStatus("error", "sync error");
-    toast("Tasks sync error: " + err.message, true);
-  });
-
   // Bill categories
   const billCatsRef = collection(db, COL_BILL_CATS);
   onSnapshot(billCatsRef, async (snap) => {
@@ -862,15 +814,20 @@ function initSubscriptions() {
         await addDoc(billCatsRef, { ...c, parentId: null });
       }
     }
-    if (mode === "bills") render();
+    render();
+  }, (err) => {
+    setSyncStatus("error", "sync error");
+    toast("Categories sync error: " + err.message, true);
   });
 
   // Bills
   const billsRef = query(collection(db, COL_BILLS), orderBy("createdAt", "desc"));
   onSnapshot(billsRef, (snap) => {
     bills = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    if (mode === "bills") render();
+    setSyncStatus("connected", "synced");
+    render();
   }, (err) => {
+    setSyncStatus("error", "sync error");
     toast("Bills sync error: " + err.message, true);
   });
 }
@@ -940,40 +897,17 @@ function filterTasks() {
   return list;
 }
 
-// ----- Render -----
+// ----- Render (bills only) -----
 function render() {
-  $("#todo-mode").style.display = "none";
-  $("#bills-mode").style.display = "none";
-
   // Member pills reflect state
   $$("#member-tabs button").forEach(b =>
     b.classList.toggle("active", b.dataset.member === memberFilter));
 
   // Settings gear reflects state
-  $("#settings-btn").classList.toggle("active",
-    (mode === "bills" ? currentBillFilter : currentFilter) === "settings");
+  $("#settings-btn").classList.toggle("active", currentBillFilter === "settings");
 
-  if (mode === "bills") {
-    $("#bills-mode").style.display = "block";
-    $("#app-tagline").textContent = "Centauri Family · To-Pay";
-    $("#member-tabs").style.display = currentBillFilter === "settings" ? "none" : "flex";
-    renderBillsView();
-    return;
-  }
-  $("#todo-mode").style.display = "block";
-  $("#app-tagline").textContent = "Centauri Family · To-Do";
-  $("#member-tabs").style.display = currentFilter === "settings" ? "none" : "flex";
-  if (currentFilter === "settings") {
-    $("#task-list").style.display = "none";
-    $("#quick-add").style.display = "none";
-    $("#settings-view").style.display = "block";
-    renderSettings();
-  } else {
-    $("#task-list").style.display = "block";
-    $("#quick-add").style.display = "flex";
-    $("#settings-view").style.display = "none";
-    renderTasks();
-  }
+  $("#member-tabs").style.display = currentBillFilter === "settings" ? "none" : "flex";
+  renderBillsView();
 }
 
 function renderTasks() {
@@ -1894,32 +1828,11 @@ function renderBillsSettings() {
 // ===== Global event wiring ===========================================
 // =====================================================================
 
-// Mode switch
-$$("#mode-switch .mode-btn").forEach(btn => {
-  btn.onclick = () => {
-    mode = btn.dataset.mode;
-    localStorage.setItem("cp-mode", mode);
-    $$("#mode-switch .mode-btn").forEach(b => b.classList.toggle("active", b === btn));
-    render();
-  };
-});
-// Restore saved mode
-$$("#mode-switch .mode-btn").forEach(b => b.classList.toggle("active", b.dataset.mode === mode));
-
 // Member filter
 $$("#member-tabs button").forEach(btn => {
   btn.onclick = () => {
     memberFilter = btn.dataset.member;
     localStorage.setItem("cp-member", memberFilter);
-    render();
-  };
-});
-
-// To-Do tabs
-$$("#tabs button").forEach(btn => {
-  btn.onclick = () => {
-    currentFilter = btn.dataset.filter;
-    $$("#tabs button").forEach(b => b.classList.toggle("active", b === btn));
     render();
   };
 });
@@ -1933,22 +1846,11 @@ $$("#bill-tabs button").forEach(btn => {
   };
 });
 
-// Settings gear (top corner) — toggles settings for the current mode
+// Settings gear (top corner)
 $("#settings-btn").onclick = () => {
-  if (mode === "bills") {
-    currentBillFilter = currentBillFilter === "settings" ? "month" : "settings";
-    $$("#bill-tabs button").forEach(b => b.classList.toggle("active", b.dataset.billFilter === currentBillFilter));
-  } else {
-    currentFilter = currentFilter === "settings" ? "today" : "settings";
-    $$("#tabs button").forEach(b => b.classList.toggle("active", b.dataset.filter === currentFilter));
-  }
+  currentBillFilter = currentBillFilter === "settings" ? "month" : "settings";
+  $$("#bill-tabs button").forEach(b => b.classList.toggle("active", b.dataset.billFilter === currentBillFilter));
   render();
-};
-
-// Quick add — tasks
-$("#qa-add").onclick = () => { addTask($("#qa-title").value); $("#qa-title").value = ""; };
-$("#qa-title").onkeydown = (e) => {
-  if (e.key === "Enter") { addTask($("#qa-title").value); $("#qa-title").value = ""; }
 };
 
 // Quick add — bills
@@ -1980,7 +1882,7 @@ function startShareWizard() {
   if (!title && u) {
     try { title = new URL(u).hostname.replace(/^www\./, ""); } catch (e) {}
   }
-  shareState = { mode: null, owner: "", title, url: u };
+  shareState = { mode: "bills", owner: "", title, url: u };
   renderShareStep(1);
 }
 
@@ -1996,7 +1898,7 @@ function shareCardOpen(inner, step) {
       <div class="share-card">
         <h3>📥 Add to CentauriPay</h3>
         <div class="share-sub">${escapeHtml(shareState.title || shareState.url || "Shared item")}${shareState.url && shareState.title ? `<br>🔗 ${escapeHtml(shareState.url)}` : ""}</div>
-        <div class="share-step-dots">STEP ${step} OF 3</div>
+        <div class="share-step-dots">STEP ${step} OF 2</div>
         ${inner}
       </div>
     </div>`;
@@ -2008,31 +1910,16 @@ function renderShareStep(step) {
   const root = $("#share-wizard");
   if (step === 1) {
     shareCardOpen(`
-      <div class="share-q">Is it a To-Do or a To-Pay?</div>
-      <div class="share-opts">
-        <button class="share-opt" data-share-mode="todo">📋 To-Do — something to get done</button>
-        <button class="share-opt" data-share-mode="bills">💵 To-Pay — a bill to pay</button>
-      </div>
-      <div class="action-row"><button class="btn" data-share-cancel>Cancel</button></div>
-    `, 1);
-    root.querySelectorAll("[data-share-mode]").forEach(b => {
-      b.onclick = () => { shareState.mode = b.dataset.shareMode; renderShareStep(2); };
-    });
-    return;
-  }
-  if (step === 2) {
-    const q = shareState.mode === "bills" ? "Who pays it?" : "Who's on it?";
-    shareCardOpen(`
-      <div class="share-q">${q}</div>
+      <div class="share-q">Who pays it?</div>
       <div class="share-opts">
         <button class="share-opt" data-share-owner="">🌍 Planet Centauri — both of us</button>
         <button class="share-opt" data-share-owner="Dreco">🪐 Dreco</button>
         <button class="share-opt" data-share-owner="Brittany">🐻 Brittany</button>
       </div>
       <div class="action-row"><button class="btn" data-share-cancel>Cancel</button></div>
-    `, 2);
+    `, 1);
     root.querySelectorAll("[data-share-owner]").forEach(b => {
-      b.onclick = () => { shareState.owner = b.dataset.shareOwner; renderShareStep(3); };
+      b.onclick = () => { shareState.owner = b.dataset.shareOwner; renderShareStep(2); };
     });
     return;
   }
@@ -2081,7 +1968,7 @@ function renderShareStep(step) {
       <button class="btn" data-share-cancel>Cancel</button>
       <button class="btn primary" data-share-add>Add it</button>
     </div>
-  `, 3);
+  `, 2);
   root.querySelector("[data-share-add]").onclick = submitShareAdd;
 }
 

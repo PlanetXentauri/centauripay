@@ -1,4 +1,4 @@
-# CentauriPay 🪐 
+ # CentauriPay 🪐 
 
 The Centauri family's shared **To-Do & To-Pay** list — Dreco, Brittany (Mama Bear), Anabella & Orion. Same design as [GSD](https://planetxentauri.github.io/to-do-list/), built for the whole family.
 

@@ -7,7 +7,7 @@ The Centauri family's shared **To-Do & To-Pay** list — Dreco, Brittany (Mama B
 - **Family member pills** at the top — filter everything by Dreco 🪐, Brittany 🐻, Anabella 🌸, or Orion ⭐
 - **Assign tasks and bills** to a member, or leave them as **Family** so they show for everyone
 - Adding an item while a member pill is selected auto-assigns it to them
-- Uses the **same Firebase project** as GSD but its own `cp_` collections — the two apps never mix data, and sync works immediately with zero setup
+- Uses the **same Firebase project** as GSD but its own `cp_` collections — the two apps never mix data, and sync works immediately with zero - Bills only — a dedicated To-Pay app with a monthly calendar
 - To-Do + To-Pay only (no credit tracker)
 
 ## Deploy to GitHub Pages (5 minutes)

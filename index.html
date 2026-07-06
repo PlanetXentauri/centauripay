@@ -323,6 +323,18 @@
   }
   .link-loc b { color: var(--text); }
 
+  /* Partial payments */
+  .pay-item {
+    display: flex; align-items: center; gap: 10px;
+    background: rgba(74,222,128,0.08); border: 1px solid rgba(74,222,128,0.3);
+    border-radius: 8px; padding: 6px 10px; font-size: 13px;
+    width: fit-content; max-width: 100%; color: #86efac; font-weight: 600;
+  }
+  .pay-item .pay-date { color: var(--text-faint); font-size: 11px; font-weight: 400; }
+  .pay-add { display: flex; gap: 8px; }
+  .pay-add input { max-width: 170px; }
+  .pay-left { color: #fde68a; font-weight: 700; }
+
   /* Notes as a list — each note fits its text exactly; tap to open bigger */
   .note-list { display: flex; flex-direction: column; gap: 6px; align-items: stretch; }
   .note-item {
@@ -1443,6 +1455,9 @@ function lastDayOfMonth() {
   const d = new Date(); const end = new Date(d.getFullYear(), d.getMonth()+1, 0);
   return end.toISOString().slice(0, 10);
 }
+// Partial payments: what's been paid this cycle, and what's left
+function paidSoFar(b) { return (b.payments || []).reduce((s, p) => s + (Number(p.amount) || 0), 0); }
+function remainingOf(b) { return Math.max(0, (Number(b.amount) || 0) - paidSoFar(b)); }
 function extractDomain(url) {
   try {
     let u = url.trim();
@@ -1815,6 +1830,7 @@ async function markBillPaid(b) {
       delete next.id;
       next.status = "open";
       next.paidAt = "";
+      next.payments = []; // fresh cycle starts with a clean balance
       next.dueDate = advanceDate(b.dueDate, b.frequency);
       next.createdAt = serverTimestamp();
       next.updatedAt = serverTimestamp();
@@ -1857,7 +1873,7 @@ function renderBillsView() {
   const monthEnd = lastDayOfMonth();
   const dueThisMonth = openBills
     .filter(b => b.dueDate && b.dueDate <= monthEnd)
-    .reduce((s, b) => s + (Number(b.amount) || 0), 0);
+    .reduce((s, b) => s + remainingOf(b), 0);
   $("#bs-monthly").textContent = "$" + monthlyBurn.toFixed(2);
   $("#bs-due-month").textContent = "$" + dueThisMonth.toFixed(2);
   $("#bs-open-count").textContent = openBills.length;
@@ -1918,7 +1934,7 @@ function renderBillCalendar() {
       const isPaid = !o.projected && b.status === "paid";
       const st = o.projected ? "s-due s-proj" : (isPaid ? "s-paid" : (b.dueDate < today ? "s-overdue" : "s-due"));
       const label = o.projected ? "Upcoming (repeats " + (b.frequency || "") + ")" : (isPaid ? "Paid ✓" : (b.dueDate < today ? "Overdue" : "Not paid yet"));
-      const amt = (Number(b.amount) || 0);
+      const amt = (o.projected || isPaid) ? (Number(b.amount) || 0) : remainingOf(b);
       const logo = b.logoUrl
         ? (b.logoUrl.startsWith("emoji:")
             ? `<span>${escapeHtml(b.logoUrl.slice(6))}</span>`
@@ -2034,8 +2050,8 @@ function billHtml(b) {
           ${pillRow}
         </div>
         <div class="bill-amount">
-          ${b.currency || "$"}${(Number(b.amount) || 0).toFixed(2)}
-          <span class="freq">${freqLabel}</span>
+          ${b.currency || "$"}${((paidSoFar(b) > 0 && !isPaid) ? remainingOf(b) : (Number(b.amount) || 0)).toFixed(2)}
+          <span class="freq">${(paidSoFar(b) > 0 && !isPaid) ? `left of ${b.currency || "$"}${(Number(b.amount) || 0).toFixed(2)}${freqLabel}` : freqLabel}</span>
         </div>
         <button class="bill-pay-btn ${isPaid ? 'paid' : ''}" data-action="toggle-paid" title="${isPaid ? 'Reopen' : 'Mark paid'}"></button>
       </div>
@@ -2076,6 +2092,21 @@ function billDetailsHtml(b) {
         <div class="field"><label>Amount</label><input type="number" step="0.01" value="${(Number(b.amount) || 0).toFixed(2)}" data-action="edit-amount" /></div>
         <div class="field"><label>Frequency</label><select data-action="edit-frequency">${freqOptions}</select></div>
         <div class="field"><label>Due date</label><input type="date" value="${b.dueDate || ''}" data-action="edit-due" /></div>
+      </div>
+      <div class="field">
+        <label>Partial payments${paidSoFar(b) > 0 ? ` — paid ${b.currency || "$"}${paidSoFar(b).toFixed(2)} · <span class="pay-left">${b.currency || "$"}${remainingOf(b).toFixed(2)} left</span>` : ""}</label>
+        <div class="note-list">
+          ${(b.payments || []).map((p, i) => `
+            <div class="pay-item" data-pay-idx="${i}">
+              <span>💸 ${b.currency || "$"}${(Number(p.amount) || 0).toFixed(2)}</span>
+              <span class="pay-date">${fmtDate(p.date)}</span>
+              <button class="icon-btn danger" data-action="del-pay">×</button>
+            </div>`).join("")}
+          <div class="pay-add">
+            <input type="number" step="0.01" placeholder="Amount paid…" data-action="pay-amount" />
+            <button class="btn primary" data-action="add-pay">Add payment</button>
+          </div>
+        </div>
       </div>
       <div class="field-row">
         <div class="field"><label>Who pays</label><select data-action="edit-assignee">${ownerOptions(b.assignee)}</select></div>
@@ -2154,6 +2185,28 @@ function bindBillEvents(b) {
     if (action === "edit-email") el.onchange = () => updateBill(b.id, { email: el.value });
     if (action === "edit-address") el.onchange = () => updateBill(b.id, { address: el.value });
     if (action === "edit-notes") el.onblur = () => updateBill(b.id, { notes: el.value });
+    if (action === "add-pay") el.onclick = async () => {
+      const inp = el.closest(".pay-add").querySelector("[data-action='pay-amount']");
+      const val = parseFloat(inp.value);
+      if (!val || val <= 0) return toast("Enter the amount paid", true);
+      const pays = [...(b.payments || []), { amount: val, date: todayISO() }];
+      const rem = Math.max(0, (Number(b.amount) || 0) - pays.reduce((s, p) => s + (Number(p.amount) || 0), 0));
+      await updateBill(b.id, { payments: pays });
+      inp.value = "";
+      if (rem <= 0) {
+        await markBillPaid({ ...b, payments: pays });
+        toast("Fully paid 🎉");
+      } else {
+        toast("Payment added — " + (b.currency || "$") + rem.toFixed(2) + " left");
+      }
+    };
+    if (action === "pay-amount") el.onkeydown = (e) => {
+      if (e.key === "Enter") el.closest(".pay-add").querySelector("[data-action='add-pay']").click();
+    };
+    if (action === "del-pay") el.onclick = () => {
+      const i = parseInt(el.closest("[data-pay-idx]").dataset.payIdx);
+      updateBill(b.id, { payments: (b.payments || []).filter((_, idx) => idx !== i) });
+    };
     if (action === "add-note") el.onkeydown = (e) => {
       if (e.key === "Enter" && el.value.trim()) {
         const list = (b.noteList && b.noteList.length) ? [...b.noteList] : (b.notes ? [b.notes] : []);

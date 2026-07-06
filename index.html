@@ -454,6 +454,9 @@
   }
   .bill-enter-btn:hover { background: rgba(99,102,241,0.4); color: #ffffff; }
   .bill-exit { margin-left: auto; padding: 10px 26px; font-size: 14px; }
+  /* Keep the amount + paid circle clear of the Enter button */
+  .bill:not(.expanded) .bill-amount,
+  .bill:not(.expanded) .bill-pay-btn { margin-top: 44px; }
   .bill-head {
     display: flex; align-items: center; gap: 12px;
   }
@@ -585,6 +588,9 @@
       grid-area: pay; justify-self: end; align-self: end;
       width: 30px; height: 30px;
     }
+    /* On phones the amount lives in the footer row — no clearance needed */
+    .bill:not(.expanded) .bill-amount,
+    .bill:not(.expanded) .bill-pay-btn { margin-top: 0; }
     .bill-title { font-size: 16px; }
     .bill-meta { margin-top: 6px; gap: 5px 8px; }
     .bill-link-pill { font-size: 13px; padding: 6px 13px; margin-top: 8px; }

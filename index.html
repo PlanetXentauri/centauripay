@@ -433,6 +433,22 @@
     text-decoration: none;
   }
   .bill-link-pill:hover { background: rgba(99,102,241,0.25); }
+  .pill-row {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    margin-top: 8px;
+  }
+  .pill-row .bill-link-pill { margin-top: 0; }
+  .contact-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 38px; height: 38px; border-radius: 50%; flex-shrink: 0;
+    background: rgba(99,102,241,0.13); border: 1px solid rgba(99,102,241,0.45);
+    font-size: 17px; text-decoration: none; line-height: 1;
+  }
+  .contact-btn:hover { background: rgba(99,102,241,0.28); }
+  .contact-btn.c-phone { background: rgba(74,222,128,0.12); border-color: rgba(74,222,128,0.45); }
+  .contact-btn.c-phone:hover { background: rgba(74,222,128,0.25); }
+  .contact-btn.c-map { background: rgba(239,68,68,0.12); border-color: rgba(239,68,68,0.45); }
+  .contact-btn.c-map:hover { background: rgba(239,68,68,0.25); }
   .bill-link-pill .arr { font-size: 12px; animation: arrblink 1.1s ease-in-out infinite; }
   @keyframes arrblink { 0%, 100% { opacity: 1; } 50% { opacity: 0.12; } }
   .bill-info-btn {
@@ -1390,7 +1406,60 @@ function advanceDate(iso, frequency) {
   return d.toISOString().slice(0, 10);
 }
 
-// ----- URL lookup: best-effort favicon + public CORS proxy -----
+// ----- Contact helpers: call / email / map buttons -----
+function cleanTel(p) { return String(p).replace(/[^+0-9]/g, ""); }
+function mapsUrl(addr) {
+  const q = encodeURIComponent(addr);
+  const ios = /iPad|iPhone|iPod/.test(navigator.userAgent);
+  return ios ? ("https://maps.apple.com/?q=" + q) : ("https://www.google.com/maps/search/?api=1&query=" + q);
+}
+
+// ----- URL lookup: best-effort, hunts for BILLING contact info -----
+async function fetchViaProxy(url) {
+  const proxy = "https://api.allorigins.win/get?url=" + encodeURIComponent(url);
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 8000);
+  const r = await fetch(proxy, { signal: ctrl.signal });
+  clearTimeout(t);
+  if (!r.ok) return "";
+  const data = await r.json();
+  return (data && data.contents) || "";
+}
+
+function extractContacts(html) {
+  const phones = [];
+  let m;
+  const telRe = /href=["']tel:([+0-9().\-\s]{7,})["']/gi;
+  while ((m = telRe.exec(html))) phones.push(m[1].trim());
+  const flat = html.replace(/<[^>]+>/g, " ");
+  const loosePhones = flat.match(/(?:\+?1[-.\s]?)?\(?[0-9]{3}\)?[-.\s]?[0-9]{3}[-.\s]?[0-9]{4}/g) || [];
+  phones.push(...loosePhones.slice(0, 6).map(s => s.trim()));
+  const emails = [];
+  const mailtoRe = /href=["']mailto:([^"'?]+)/gi;
+  while ((m = mailtoRe.exec(html))) emails.push(m[1].trim());
+  const looseEmails = (html.match(/[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}/g) || [])
+    .filter(e => !/\.(png|jpg|svg|gif|webp)$/i.test(e));
+  emails.push(...looseEmails.slice(0, 6));
+  let address = "";
+  const addrMatch = html.match(/<address[^>]*>([\s\S]*?)<\/address>/i);
+  if (addrMatch) address = addrMatch[1].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 200);
+  return { phones, emails, address };
+}
+
+// Prefer toll-free (billing/customer-service) numbers, then anything
+function pickBillingPhone(phones) {
+  const isTollFree = (p) => {
+    let d = String(p).replace(/[^0-9]/g, "");
+    if (d.length === 11 && d[0] === "1") d = d.slice(1);
+    return d.length === 10 && /^8(00|88|77|66|55|44|33)/.test(d);
+  };
+  return phones.find(isTollFree) || phones[0] || "";
+}
+// Prefer billing-ish inboxes, then anything
+function pickBillingEmail(emails) {
+  return emails.find(e => /billing|payment|invoice|account|support|service|help|care/i.test(e)) || emails[0] || "";
+}
+
 async function lookupCompany(rawUrl) {
   const result = { logoUrl: "", name: "", description: "", phone: "", email: "", address: "", url: "" };
   const domain = extractDomain(rawUrl);
@@ -1399,14 +1468,7 @@ async function lookupCompany(rawUrl) {
   result.logoUrl = "https://www.google.com/s2/favicons?sz=128&domain=" + domain;
   result.name = domain.split(".")[0].replace(/^./, c => c.toUpperCase());
   try {
-    const proxy = "https://api.allorigins.win/get?url=" + encodeURIComponent("https://" + domain + "/");
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), 8000);
-    const r = await fetch(proxy, { signal: ctrl.signal });
-    clearTimeout(t);
-    if (!r.ok) return result;
-    const data = await r.json();
-    const html = (data && data.contents) || "";
+    const html = await fetchViaProxy("https://" + domain + "/");
     if (!html) return result;
     const grab = (re) => { const m = html.match(re); return m ? m[1].trim() : ""; };
     const siteName = grab(/<meta[^>]+property=["']og:site_name["'][^>]+content=["']([^"']+)["']/i);
@@ -1416,23 +1478,29 @@ async function lookupCompany(rawUrl) {
     else if (ogTitle && ogTitle.length < 40) result.name = ogTitle;
     if (ogDesc) result.description = ogDesc.slice(0, 200);
 
-    const telMatch = html.match(/href=["']tel:([+0-9().\-\s]+)["']/i);
-    if (telMatch) result.phone = telMatch[1].trim();
-    else {
-      const phoneRe = /(?:\+?1[-.\s]?)?\(?([0-9]{3})\)?[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})/;
-      const pm = html.replace(/<[^>]+>/g, " ").match(phoneRe);
-      if (pm) result.phone = pm[0];
-    }
-    const mailtoMatch = html.match(/href=["']mailto:([^"']+)["']/i);
-    if (mailtoMatch) result.email = mailtoMatch[1].split("?")[0];
-    else {
-      const emailRe = /[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}/g;
-      const emails = (html.match(emailRe) || []).filter(e => !/\.(png|jpg|svg|gif|webp)$/i.test(e));
-      if (emails.length) result.email = emails[0];
-    }
-    const addrMatch = html.match(/<address[^>]*>([\s\S]*?)<\/address>/i);
-    if (addrMatch) {
-      result.address = addrMatch[1].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 200);
+    const home = extractContacts(html);
+    result.phone = pickBillingPhone(home.phones);
+    result.email = pickBillingEmail(home.emails);
+    result.address = home.address;
+
+    // Hunt for a billing / contact / support page and prefer what's on it
+    const pageMatch = html.match(/href=["']([^"']*(?:billing|pay-?my-?bill|contact|support|customer[-_]?service|help)[^"']*)["']/i);
+    if (pageMatch) {
+      let cUrl = pageMatch[1];
+      if (cUrl.startsWith("//")) cUrl = "https:" + cUrl;
+      else if (cUrl.startsWith("/")) cUrl = "https://" + domain + cUrl;
+      else if (!/^https?:/i.test(cUrl)) cUrl = "https://" + domain + "/" + cUrl;
+      try {
+        const chtml = await fetchViaProxy(cUrl);
+        if (chtml) {
+          const c = extractContacts(chtml);
+          const p = pickBillingPhone(c.phones);
+          const e = pickBillingEmail(c.emails);
+          if (p) result.phone = p;
+          if (e) result.email = e;
+          if (c.address) result.address = c.address;
+        }
+      } catch (e) { /* best effort */ }
     }
   } catch (e) { /* swallow — best effort */ }
   return result;
@@ -1756,6 +1824,13 @@ function billHtml(b) {
   const linkPill = pillUrl
     ? `<a class="bill-link-pill" href="${escapeHtml(pillUrl)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">🌐 ${escapeHtml(pillDomain)}<span class="arr">↗</span></a>`
     : "";
+  const contactBtns = [];
+  if (b.phone) contactBtns.push(`<a class="contact-btn c-phone" href="tel:${escapeHtml(cleanTel(b.phone))}" onclick="event.stopPropagation()" title="Call ${escapeHtml(b.phone)}">📞</a>`);
+  if (b.email) contactBtns.push(`<a class="contact-btn c-mail" href="mailto:${escapeHtml(b.email)}" onclick="event.stopPropagation()" title="Email ${escapeHtml(b.email)}">✉️</a>`);
+  if (b.address) contactBtns.push(`<a class="contact-btn c-map" href="${escapeHtml(mapsUrl(b.address))}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="Map: ${escapeHtml(b.address)}">📍</a>`);
+  const pillRow = (linkPill || contactBtns.length)
+    ? `<div class="pill-row">${linkPill}${contactBtns.join("")}</div>`
+    : "";
   return `
     <div class="bill ${isExpanded ? 'expanded' : ''} ${isPaid ? 'paid' : ''}" data-bill-id="${b.id}">
       <div class="bill-head">
@@ -1769,7 +1844,7 @@ function billHtml(b) {
             ${catChip}
             ${dueText}
           </div>
-          ${linkPill}
+          ${pillRow}
         </div>
         <div class="bill-amount">
           ${b.currency || "$"}${(Number(b.amount) || 0).toFixed(2)}

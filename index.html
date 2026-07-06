@@ -1728,6 +1728,7 @@ function billHtml(b) {
   return `
     <div class="bill ${isExpanded ? 'expanded' : ''} ${isPaid ? 'paid' : ''}" data-bill-id="${b.id}">
       <div class="bill-head">
+        <button class="bill-info-btn" data-action="expand" title="${isExpanded ? 'Hide details' : 'Show details & edit'}"><span class="arr-glyph">${isExpanded ? '▲' : '▼'}</span></button>
         ${logoHtml}
         <div class="bill-body" data-action="expand">
           <div class="bill-title">${escapeHtml(b.company || "Unnamed bill")}${lookupSpinner}</div>
@@ -1743,7 +1744,6 @@ function billHtml(b) {
           ${b.currency || "$"}${(Number(b.amount) || 0).toFixed(2)}
           <span class="freq">${freqLabel}</span>
         </div>
-        <button class="bill-info-btn" data-action="expand" title="${isExpanded ? 'Hide details' : 'Show details & edit'}"><span class="arr-glyph">${isExpanded ? '▲' : '▼'}</span></button>
         <button class="bill-pay-btn ${isPaid ? 'paid' : ''}" data-action="toggle-paid" title="${isPaid ? 'Reopen' : 'Mark paid'}"></button>
       </div>
       ${isExpanded ? billDetailsHtml(b) : ""}

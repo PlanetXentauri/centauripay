@@ -966,10 +966,42 @@ function initSubscriptions() {
     bills = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     setSyncStatus("connected", "synced");
     render();
+    autoEnrichContacts(); // quietly pull billing contacts for bills that don't have them yet
   }, (err) => {
     setSyncStatus("error", "sync error");
     toast("Bills sync error: " + err.message, true);
   });
+}
+
+// ----- Auto-enrichment: any bill with a website but no contact info
+// gets its billing phone / email / address pulled automatically (once) -----
+const enrichTried = new Set();
+let enrichRunning = false;
+async function autoEnrichContacts() {
+  if (enrichRunning || !FIREBASE_CONFIGURED) return;
+  enrichRunning = true;
+  try {
+    while (true) {
+      const b = bills.find(x =>
+        x.url && !x.phone && !x.email && !x.address &&
+        !x.contactTried && !enrichTried.has(x.id));
+      if (!b) break;
+      enrichTried.add(b.id);
+      try {
+        const info = await lookupCompany(b.url);
+        const patch = { contactTried: true };
+        if (info.phone) patch.phone = info.phone;
+        if (info.email) patch.email = info.email;
+        if (info.address) patch.address = info.address;
+        if (info.description && !b.description) patch.description = info.description;
+        await updateBill(b.id, patch);
+      } catch (e) {
+        try { await updateBill(b.id, { contactTried: true }); } catch (e2) {}
+      }
+    }
+  } finally {
+    enrichRunning = false;
+  }
 }
 
 // ----- Task CRUD -----
@@ -1426,6 +1458,23 @@ async function fetchViaProxy(url) {
   return (data && data.contents) || "";
 }
 
+// Fetch a page as readable content — raw HTML first, then a rendered-text
+// reader as fallback (handles modern JS-only sites the proxy can't read)
+async function fetchPageText(url) {
+  try {
+    const h = await fetchViaProxy(url);
+    if (h && h.length > 300) return h;
+  } catch (e) {}
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 15000);
+    const r = await fetch("https://r.jina.ai/" + url, { signal: ctrl.signal });
+    clearTimeout(t);
+    if (r.ok) return await r.text();
+  } catch (e) {}
+  return "";
+}
+
 function extractContacts(html) {
   const phones = [];
   let m;
@@ -1443,6 +1492,11 @@ function extractContacts(html) {
   let address = "";
   const addrMatch = html.match(/<address[^>]*>([\s\S]*?)<\/address>/i);
   if (addrMatch) address = addrMatch[1].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 200);
+  if (!address) {
+    // Loose US street-address pattern in plain text
+    const am = flat.match(/\d{1,6}\s+[A-Za-z0-9 .'\-]{3,40}(?:Street|St\.?|Avenue|Ave\.?|Boulevard|Blvd\.?|Road|Rd\.?|Drive|Dr\.?|Lane|Ln\.?|Way|Court|Ct\.?|Parkway|Pkwy\.?|Highway|Hwy\.?)[^\n,]{0,30},?\s*[A-Za-z .'\-]{2,25},?\s*[A-Z]{2}\s*\d{5}(?:-\d{4})?/);
+    if (am) address = am[0].replace(/\s+/g, " ").trim().slice(0, 200);
+  }
   return { phones, emails, address };
 }
 
@@ -1468,7 +1522,7 @@ async function lookupCompany(rawUrl) {
   result.logoUrl = "https://www.google.com/s2/favicons?sz=128&domain=" + domain;
   result.name = domain.split(".")[0].replace(/^./, c => c.toUpperCase());
   try {
-    const html = await fetchViaProxy("https://" + domain + "/");
+    const html = await fetchPageText("https://" + domain + "/");
     if (!html) return result;
     const grab = (re) => { const m = html.match(re); return m ? m[1].trim() : ""; };
     const siteName = grab(/<meta[^>]+property=["']og:site_name["'][^>]+content=["']([^"']+)["']/i);
@@ -1491,7 +1545,7 @@ async function lookupCompany(rawUrl) {
       else if (cUrl.startsWith("/")) cUrl = "https://" + domain + cUrl;
       else if (!/^https?:/i.test(cUrl)) cUrl = "https://" + domain + "/" + cUrl;
       try {
-        const chtml = await fetchViaProxy(cUrl);
+        const chtml = await fetchPageText(cUrl);
         if (chtml) {
           const c = extractContacts(chtml);
           const p = pickBillingPhone(c.phones);
@@ -1925,10 +1979,25 @@ function bindBillEvents(b) {
     };
     if (action === "delete") el.onclick = () => deleteBill(b);
     if (action === "edit-company") el.onchange = () => updateBill(b.id, { company: el.value });
-    if (action === "edit-url") el.onchange = () => {
+    if (action === "edit-url") el.onchange = async () => {
       const url = el.value.trim();
       const domain = extractDomain(url);
-      updateBill(b.id, { url, domain, logoUrl: domain ? ("https://www.google.com/s2/favicons?sz=128&domain=" + domain) : "" });
+      updateBill(b.id, { url, domain, logoUrl: domain ? ("https://www.google.com/s2/favicons?sz=128&domain=" + domain) : "", lookupStatus: domain ? "pending" : "" });
+      if (!domain) return;
+      // The website is the source of truth — pull all its info automatically
+      try {
+        const info = await lookupCompany(url);
+        const patch = { lookupStatus: "done", contactTried: true };
+        if (info.logoUrl) patch.logoUrl = info.logoUrl;
+        if (info.name && !b.company) patch.company = info.name;
+        if (info.description && !b.description) patch.description = info.description;
+        if (info.phone && !b.phone) patch.phone = info.phone;
+        if (info.email && !b.email) patch.email = info.email;
+        if (info.address && !b.address) patch.address = info.address;
+        updateBill(b.id, patch);
+      } catch (e) {
+        updateBill(b.id, { lookupStatus: "failed" });
+      }
     };
     if (action === "edit-amount") el.onchange = () => updateBill(b.id, { amount: parseFloat(el.value) || 0 });
     if (action === "edit-frequency") el.onchange = () => updateBill(b.id, { frequency: el.value });

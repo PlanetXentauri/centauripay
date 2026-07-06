@@ -323,21 +323,22 @@
   }
   .link-loc b { color: var(--text); }
 
-  /* Notes as a list — tap a note to open it bigger */
-  .note-list { display: flex; flex-direction: column; gap: 6px; }
+  /* Notes as a list — each note fits its text exactly; tap to open bigger */
+  .note-list { display: flex; flex-direction: column; gap: 6px; align-items: stretch; }
   .note-item {
-    display: flex; align-items: flex-start; gap: 8px;
+    display: flex; align-items: flex-start; gap: 7px;
     background: var(--panel-2); border: 1px solid var(--panel-border);
-    border-radius: 8px; padding: 8px 10px; font-size: 13px;
+    border-radius: 8px; padding: 6px 8px; font-size: 13px;
+    width: fit-content; max-width: 100%;
   }
+  .note-emoji { flex-shrink: 0; font-size: 13px; line-height: 1.5; }
   .note-text {
-    flex: 1; cursor: pointer; min-width: 0;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    cursor: pointer; min-width: 0; line-height: 1.5;
+    white-space: pre-wrap; overflow-wrap: anywhere;
   }
+  .note-item .icon-btn { padding: 0 4px; line-height: 1.5; }
   .note-item.open { background: var(--panel); border-color: rgba(99,102,241,0.45); }
-  .note-item.open .note-text {
-    white-space: pre-wrap; overflow: visible; font-size: 14px; line-height: 1.55;
-  }
+  .note-item.open .note-text { font-size: 15px; line-height: 1.6; }
 
   /* Action buttons */
   .action-row { display: flex; gap: 8px; justify-content: flex-end; }
@@ -2054,6 +2055,7 @@ function billDetailsHtml(b) {
   const noteItems = (b.noteList && b.noteList.length) ? b.noteList : (b.notes ? [b.notes] : []);
   const notesHtml = noteItems.map((n, i) => `
     <div class="note-item" data-note-idx="${i}">
+      <span class="note-emoji">📝</span>
       <span class="note-text" data-action="open-note">${escapeHtml(n)}</span>
       <button class="icon-btn danger" data-action="del-note">×</button>
     </div>`).join("");

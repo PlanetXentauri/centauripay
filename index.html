@@ -2138,8 +2138,8 @@ const AI_TOOLS = [{
         amount: { type: "NUMBER" },
         frequency: { type: "STRING", enum: ["once","weekly","monthly","quarterly","yearly"] },
         dueDate: { type: "STRING", description: "YYYY-MM-DD" },
-        assignee: { type: "STRING", enum: ["", "Dreco", "Brittany"], description: "who pays; empty = whole family" },
-        forWhom: { type: "STRING", enum: ["", "Dreco", "Brittany", "Annabella", "Orion"], description: "who it's for; empty = whole family" },
+        assignee: { type: "STRING", enum: ["family", "Dreco", "Brittany"], description: "who pays; 'family' = Planet Centauri / both" },
+        forWhom: { type: "STRING", enum: ["family", "Dreco", "Brittany", "Annabella", "Orion"], description: "who it's for; 'family' = everyone" },
         category: { type: "STRING" },
         url: { type: "STRING", description: "company website domain if known, e.g. netflix.com" }
       }, required: ["company"] }
@@ -2152,8 +2152,8 @@ const AI_TOOLS = [{
         amount: { type: "NUMBER" },
         dueDate: { type: "STRING", description: "YYYY-MM-DD" },
         frequency: { type: "STRING", enum: ["once","weekly","monthly","quarterly","yearly"] },
-        assignee: { type: "STRING", enum: ["", "Dreco", "Brittany"] },
-        forWhom: { type: "STRING", enum: ["", "Dreco", "Brittany", "Annabella", "Orion"] },
+        assignee: { type: "STRING", enum: ["family", "Dreco", "Brittany"] },
+        forWhom: { type: "STRING", enum: ["family", "Dreco", "Brittany", "Annabella", "Orion"] },
         category: { type: "STRING" },
         notes: { type: "STRING" }
       }, required: ["id"] }
@@ -2178,7 +2178,7 @@ function aiSystemPrompt() {
     category: b.category || ""
   }));
   return "You are Centauri AI, the friendly assistant inside CentauriPay, the Centauri family's shared bills app.\n" +
-    "Family: Dreco (dad), Brittany (Mama Bear), kids Annabella and Orion. 'Planet Centauri' means the whole family (empty assignee/forWhom).\n" +
+    "Family: Dreco (dad), Brittany (Mama Bear), kids Annabella and Orion. 'Planet Centauri' means the whole family — use the value 'family' for assignee/forWhom in tools (shown as empty string in the bills JSON).\n" +
     "Today is " + todayISO() + ". Currency is USD.\n" +
     "Current bills JSON: " + JSON.stringify(snapshot) + "\n" +
     "Use the tools to add bills, update them, or mark them paid when the user asks. Resolve relative dates ('the 15th', 'next Friday') into YYYY-MM-DD yourself. Match loosely-named companies to the closest bill in the list. A bill is overdue if unpaid and dueDate is before today.\n" +
@@ -2195,7 +2195,7 @@ async function aiExecTool(name, args) {
         domain,
         logoUrl: domain ? faviconFor(args.url) : "",
         assignee: PARENTS.includes(args.assignee) ? args.assignee : "",
-        forWhom: args.forWhom ? fixSpelling(args.forWhom) : "",
+        forWhom: (args.forWhom && args.forWhom !== "family") ? fixSpelling(args.forWhom) : "",
         category: args.category || billCategories[0]?.name || "",
         amount: Number(args.amount) || 0,
         currency: "$",
@@ -2216,7 +2216,12 @@ async function aiExecTool(name, args) {
       if (!b) return { ok: false, error: "bill not found" };
       const patch = {};
       for (const k of ["amount","dueDate","frequency","assignee","forWhom","category","notes"]) {
-        if (args[k] !== undefined) patch[k] = (k === "amount") ? (Number(args[k]) || 0) : (k === "forWhom" ? fixSpelling(args[k]) : args[k]);
+        if (args[k] === undefined) continue;
+        let v = args[k];
+        if (k === "amount") v = Number(v) || 0;
+        if ((k === "assignee" || k === "forWhom") && v === "family") v = "";
+        if (k === "forWhom") v = fixSpelling(v);
+        patch[k] = v;
       }
       await updateBill(args.id, patch);
       aiChat.push({ who: "action", text: "✓ Updated " + b.company });
@@ -2298,12 +2303,12 @@ function renderAiPanel() {
 
 1. Open aistudio.google.com/apikey
 2. Sign in → Create API key
-3. Paste it below (it starts with "AIza")
+3. Copy it and paste it below
 
 The key is saved only on this device — never in the app's code.</div>
         </div>
         <div class="ai-inputbar">
-          <input id="ai-key-input" type="password" placeholder="Paste API key (AIza…)" />
+          <input id="ai-key-input" type="password" placeholder="Paste your API key here" />
           <button class="ai-send" id="ai-key-save">Save</button>
         </div>
       </div></div>`;

@@ -621,6 +621,7 @@
   .cal-bill.s-paid { background: rgba(74,222,128,0.18); color: #86efac; border-color: rgba(74,222,128,0.45); }
   .cal-bill.s-due { background: rgba(212,165,93,0.18); color: #fde68a; border-color: rgba(212,165,93,0.45); }
   .cal-bill.s-overdue { background: rgba(239,68,68,0.20); color: #fca5a5; border-color: rgba(239,68,68,0.55); }
+  .cal-bill.s-proj { border-style: dashed; opacity: 0.75; }
   .cal-legend {
     display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px;
     align-items: center;
@@ -1875,17 +1876,31 @@ function renderBillCalendar() {
 
   const visible = bills.filter(b => matchesMember(b) && b.dueDate);
   const byDate = {};
-  for (const b of visible) (byDate[b.dueDate] = byDate[b.dueDate] || []).push(b);
+  const pushOcc = (iso, b, projected) => { (byDate[iso] = byDate[iso] || []).push({ b, projected }); };
+  const horizon = addDaysISO(370); // project recurring bills at least a year out
+  for (const b of visible) {
+    pushOcc(b.dueDate, b, false);
+    // Weekly / monthly / quarterly / yearly bills repeat on the calendar automatically
+    if (b.status !== "paid" && b.frequency && b.frequency !== "once") {
+      let d = advanceDate(b.dueDate, b.frequency);
+      let guard = 0;
+      while (d && d <= horizon && guard++ < 60) {
+        pushOcc(d, b, true);
+        d = advanceDate(d, b.frequency);
+      }
+    }
+  }
 
   const dows = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
   let cells = dows.map(d => `<div class="cal-dow">${d}</div>`).join("");
   for (let i = 0; i < startDow; i++) cells += `<div class="cal-day other"></div>`;
   for (let d = 1; d <= daysInMonth; d++) {
     const iso = `${calYear}-${String(calMonth + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
-    const chips = (byDate[iso] || []).map(b => {
-      const isPaid = b.status === "paid";
-      const st = isPaid ? "s-paid" : (b.dueDate < today ? "s-overdue" : "s-due");
-      const label = isPaid ? "Paid ✓" : (b.dueDate < today ? "Overdue" : "Not paid yet");
+    const chips = (byDate[iso] || []).map(o => {
+      const b = o.b;
+      const isPaid = !o.projected && b.status === "paid";
+      const st = o.projected ? "s-due s-proj" : (isPaid ? "s-paid" : (b.dueDate < today ? "s-overdue" : "s-due"));
+      const label = o.projected ? "Upcoming (repeats " + (b.frequency || "") + ")" : (isPaid ? "Paid ✓" : (b.dueDate < today ? "Overdue" : "Not paid yet"));
       const amt = (Number(b.amount) || 0);
       const logo = b.logoUrl
         ? `<img src="${escapeHtml(b.logoUrl)}" alt="" onerror="this.remove()"/>`
@@ -1907,6 +1922,7 @@ function renderBillCalendar() {
         <span class="cal-bill s-paid"><span>✓ Paid</span></span>
         <span class="cal-bill s-due"><span>⏳ Not paid yet</span></span>
         <span class="cal-bill s-overdue"><span>⚠ Overdue</span></span>
+        <span class="cal-bill s-due s-proj"><span>🔁 Repeats (auto)</span></span>
       </div>
     </div>`;
 

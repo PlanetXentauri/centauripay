@@ -316,6 +316,12 @@
   .link-info a:hover { text-decoration: underline; }
   .link-info-name { color: var(--text); font-weight: 600; }
   .link-info-desc { flex-basis: 100%; color: var(--text-faint); }
+  .link-loc {
+    flex-basis: 100%; line-height: 1.6;
+    padding: 6px 10px; border-radius: 8px;
+    background: var(--panel-2); border: 1px solid var(--panel-border);
+  }
+  .link-loc b { color: var(--text); }
 
   /* Action buttons */
   .action-row { display: flex; gap: 8px; justify-content: flex-end; }
@@ -1475,6 +1481,41 @@ async function fetchPageText(url) {
   return "";
 }
 
+function stripHtml(s) {
+  return String(s)
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&[a-z#0-9]+;/gi, " ")
+    .replace(/\s+/g, " ").trim();
+}
+
+// Use Centauri AI (if the key is set up) to READ a page and pull out
+// structured contact info — every location, address, phone, email on it
+async function aiExtractContacts(text, url) {
+  if (!getAiKey() || !text) return null;
+  try {
+    const r = await fetch("https://generativelanguage.googleapis.com/v1beta/models/" + AI_MODEL + ":generateContent?key=" + encodeURIComponent(getAiKey()), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ role: "user", parts: [{ text:
+          "Extract contact information from this webpage (" + url + "). " +
+          'Reply with ONLY JSON, no prose: {"name": string, "description": string (max 140 chars), "locations": [{"label": string, "address": string, "phone": string, "email": string}]}. ' +
+          "Include EVERY location/branch/office listed on the page (max 6). Use empty strings for unknown fields. Prefer billing/customer-service contacts when several exist.\n\nPAGE TEXT:\n" + text.slice(0, 14000)
+        }]}],
+        generationConfig: { responseMimeType: "application/json" }
+      })
+    });
+    const j = await r.json();
+    if (j.error) return null;
+    const raw = (j.candidates && j.candidates[0] && j.candidates[0].content && j.candidates[0].content.parts || []).map(p => p.text || "").join("");
+    const parsed = JSON.parse(raw);
+    if (parsed && Array.isArray(parsed.locations)) parsed.locations = parsed.locations.slice(0, 6);
+    return parsed;
+  } catch (e) { return null; }
+}
+
 function extractContacts(html) {
   const phones = [];
   let m;
@@ -1556,6 +1597,19 @@ async function lookupCompany(rawUrl) {
         }
       } catch (e) { /* best effort */ }
     }
+
+    // If Centauri AI is set up, let it read the page for anything still missing
+    if (getAiKey() && (!result.phone || !result.email || !result.address)) {
+      const ai = await aiExtractContacts(stripHtml(html), "https://" + domain);
+      if (ai) {
+        const f = (ai.locations && ai.locations[0]) || {};
+        if (!result.phone && f.phone) result.phone = f.phone;
+        if (!result.email && f.email) result.email = f.email;
+        if (!result.address && f.address) result.address = f.address;
+        if (ai.name) result.name = ai.name;
+        if (!result.description && ai.description) result.description = ai.description;
+      }
+    }
   } catch (e) { /* swallow — best effort */ }
   return result;
 }
@@ -1570,11 +1624,18 @@ function linkBlockHtml(l, i) {
   const logo = l.logoUrl || faviconFor(l.url);
   const spinner = l.lookupStatus === "pending" ? `<span class="lookup-spinner" title="Looking up info…"></span>` : "";
   const bits = [];
+  const locs = (l.locations || []).filter(x => x && (x.address || x.phone || x.email));
   if (l.name) bits.push(`<span class="link-info-name">${escapeHtml(l.name)}</span>`);
-  if (l.phone) bits.push(`<span>📞 <a href="tel:${escapeHtml(l.phone)}">${escapeHtml(l.phone)}</a></span>`);
-  if (l.email) bits.push(`<span>✉️ <a href="mailto:${escapeHtml(l.email)}">${escapeHtml(l.email)}</a></span>`);
-  if (l.address) bits.push(`<span>📍 ${escapeHtml(l.address)}</span>`);
   if (l.description) bits.push(`<span class="link-info-desc">${escapeHtml(l.description)}</span>`);
+  if (locs.length) {
+    for (const x of locs) {
+      bits.push(`<span class="link-loc">${x.label ? `<b>${escapeHtml(x.label)}</b><br>` : ""}${x.address ? `<a href="${escapeHtml(mapsUrl(x.address))}" target="_blank" rel="noopener">📍 ${escapeHtml(x.address)}</a><br>` : ""}${x.phone ? `<a href="tel:${escapeHtml(cleanTel(x.phone))}">📞 ${escapeHtml(x.phone)}</a> ` : ""}${x.email ? `<a href="mailto:${escapeHtml(x.email)}">✉️ ${escapeHtml(x.email)}</a>` : ""}</span>`);
+    }
+  } else {
+    if (l.phone) bits.push(`<span>📞 <a href="tel:${escapeHtml(cleanTel(l.phone))}">${escapeHtml(l.phone)}</a></span>`);
+    if (l.email) bits.push(`<span>✉️ <a href="mailto:${escapeHtml(l.email)}">${escapeHtml(l.email)}</a></span>`);
+    if (l.address) bits.push(`<span>📍 <a href="${escapeHtml(mapsUrl(l.address))}" target="_blank" rel="noopener">${escapeHtml(l.address)}</a></span>`);
+  }
   return `
     <div class="link-block" data-link-idx="${i}">
       <div class="link-row">
@@ -1602,6 +1663,40 @@ async function enrichLinkAt(kind, id, idx, url) {
   if (!url || !extractDomain(url)) return;
   patchLink(kind, id, idx, url, { logoUrl: faviconFor(url), lookupStatus: "pending" });
   try {
+    // Scan the EXACT page the link points to (not just the site's homepage)
+    const page = await fetchPageText(url);
+    if (page) {
+      // Best: let Centauri AI read the page and pull structured info
+      const ai = await aiExtractContacts(page.includes("<") ? stripHtml(page) : page, url);
+      if (ai && (ai.name || (ai.locations && ai.locations.length))) {
+        const first = (ai.locations && ai.locations[0]) || {};
+        patchLink(kind, id, idx, url, {
+          logoUrl: faviconFor(url),
+          name: ai.name || "",
+          description: ai.description || "",
+          phone: first.phone || "",
+          email: first.email || "",
+          address: first.address || "",
+          locations: ai.locations || [],
+          lookupStatus: "done"
+        });
+        return;
+      }
+      // Fallback: pattern-scan the page itself
+      const c = extractContacts(page);
+      const phone = pickBillingPhone(c.phones);
+      const email = pickBillingEmail(c.emails);
+      if (phone || email || c.address) {
+        patchLink(kind, id, idx, url, {
+          logoUrl: faviconFor(url),
+          phone: phone || "", email: email || "", address: c.address || "",
+          locations: [],
+          lookupStatus: "done"
+        });
+        return;
+      }
+    }
+    // Last resort: general company lookup by domain
     const info = await lookupCompany(url);
     patchLink(kind, id, idx, url, {
       logoUrl: info.logoUrl || faviconFor(url),
@@ -1610,6 +1705,7 @@ async function enrichLinkAt(kind, id, idx, url) {
       email: info.email || "",
       address: info.address || "",
       description: info.description || "",
+      locations: [],
       lookupStatus: "done"
     });
   } catch (e) {

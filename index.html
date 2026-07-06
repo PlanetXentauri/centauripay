@@ -1903,7 +1903,9 @@ function renderBillCalendar() {
       const label = o.projected ? "Upcoming (repeats " + (b.frequency || "") + ")" : (isPaid ? "Paid ✓" : (b.dueDate < today ? "Overdue" : "Not paid yet"));
       const amt = (Number(b.amount) || 0);
       const logo = b.logoUrl
-        ? `<img src="${escapeHtml(b.logoUrl)}" alt="" onerror="this.remove()"/>`
+        ? (b.logoUrl.startsWith("emoji:")
+            ? `<span>${escapeHtml(b.logoUrl.slice(6))}</span>`
+            : `<img src="${escapeHtml(b.logoUrl)}" alt="" onerror="this.remove()"/>`)
         : "";
       return `<div class="cal-bill ${st}" data-cal-bill="${b.id}" title="${escapeHtml(b.company || "Bill")} — ${label} — $${amt.toFixed(2)}">${logo}<span>$${amt % 1 ? amt.toFixed(2) : amt.toFixed(0)}</span></div>`;
     }).join("");
@@ -1983,7 +1985,9 @@ function billHtml(b) {
     dueText = `<span>paid ${fmtDate(b.paidAt)}</span>`;
   }
   const logoHtml = b.logoUrl
-    ? `<div class="bill-logo"><img src="${escapeHtml(b.logoUrl)}" alt="" onerror="this.parentElement.innerHTML='💵'"/></div>`
+    ? (b.logoUrl.startsWith("emoji:")
+        ? `<div class="bill-logo">${escapeHtml(b.logoUrl.slice(6))}</div>`
+        : `<div class="bill-logo"><img src="${escapeHtml(b.logoUrl)}" alt="" onerror="this.parentElement.innerHTML='💵'"/></div>`)
     : `<div class="bill-logo">💵</div>`;
   const pillUrl = b.url || ((b.links || []).find(l => l.url) || {}).url || "";
   const pillDomain = pillUrl ? (b.domain || extractDomain(pillUrl) || pillUrl) : "";

@@ -493,6 +493,16 @@
   @media (max-width: 540px) {
     .bill-contact-grid { grid-template-columns: 1fr; gap: 2px; }
     .bill-contact-grid .label { margin-top: 6px; }
+    /* Phone layout: row 1 = arrow · logo · amount · paid circle, row 2 = title + chips + link, full width */
+    .bill { padding: 12px; }
+    .bill-head { flex-wrap: wrap; row-gap: 2px; }
+    .bill-body { order: 10; flex-basis: 100%; min-width: 100%; margin-top: 4px; }
+    .bill-amount { margin-left: auto; display: flex; align-items: baseline; gap: 5px; }
+    .bill-amount .freq { display: inline; margin-top: 0; }
+    .bill-logo { width: 40px; height: 40px; }
+    .bill-title { font-size: 16px; }
+    .bill-meta { margin-top: 5px; gap: 5px; }
+    .bill-link-pill { font-size: 13px; padding: 6px 13px; margin-top: 7px; }
   }
 
   /* ====== Share intake wizard ====== */

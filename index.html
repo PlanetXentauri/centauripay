@@ -2127,6 +2127,9 @@ let aiOpen = false;
 let aiBusy = false;
 let aiChat = [];      // { who: "user"|"bot"|"action", text }
 let aiContents = [];  // Gemini conversation history
+let aiRec = null;         // active SpeechRecognition instance
+let aiRecActive = false;  // true while recording
+let aiRecBase = "";       // text that was in the box before recording
 
 const AI_TOOLS = [{
   functionDeclarations: [
@@ -2345,7 +2348,7 @@ Try:
         ${aiBusy ? `<div class="ai-typing">Centauri AI is thinking…</div>` : ""}
       </div>
       <div class="ai-inputbar">
-        ${hasMic ? `<button class="ai-mic" id="ai-mic" title="Talk instead of type">🎤</button>` : ""}
+        ${hasMic ? `<button class="ai-mic ${aiRecActive ? "rec" : ""}" id="ai-mic" title="Tap to record, tap again to stop">🎤</button>` : ""}
         <input id="ai-input" type="text" placeholder="Ask or tell me about a bill…" ${aiBusy ? "disabled" : ""} />
         <button class="ai-send" id="ai-send" ${aiBusy ? "disabled" : ""}>Send</button>
       </div>
@@ -2366,15 +2369,52 @@ Try:
   if (input) input.onkeydown = (e) => { if (e.key === "Enter") doSend(); };
   const mic = $("#ai-mic");
   if (mic) mic.onclick = () => {
+    // Tap while recording → stop; the text stays in the box for you to Send
+    if (aiRecActive) {
+      aiRecActive = false;
+      try { aiRec.stop(); } catch (e) {}
+      mic.classList.remove("rec");
+      if (input) input.focus();
+      return;
+    }
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    const rec = new SR();
-    rec.lang = "en-US";
-    rec.interimResults = false;
-    mic.classList.add("rec");
-    rec.onresult = (e) => { input.value = e.results[0][0].transcript; mic.classList.remove("rec"); doSend(); };
-    rec.onerror = () => mic.classList.remove("rec");
-    rec.onend = () => mic.classList.remove("rec");
-    rec.start();
+    if (!SR) return toast("Voice input isn't supported in this browser", true);
+    aiRec = new SR();
+    aiRec.lang = "en-US";
+    aiRec.continuous = true;       // keep listening until tapped again
+    aiRec.interimResults = true;   // words appear live in the box
+    aiRecBase = input && input.value ? input.value.trim() + " " : "";
+    aiRec.onresult = (e) => {
+      let finals = "", interim = "";
+      for (let i = 0; i < e.results.length; i++) {
+        const t = e.results[i][0].transcript;
+        if (e.results[i].isFinal) finals += t + " "; else interim += t;
+      }
+      if (input) input.value = (aiRecBase + finals + interim).replace(/\s+/g, " ").trimStart();
+    };
+    aiRec.onerror = (e) => {
+      aiRecActive = false;
+      mic.classList.remove("rec");
+      if (e.error === "not-allowed" || e.error === "service-not-allowed") {
+        toast("Microphone blocked — allow mic access for this site in your browser settings", true);
+      } else if (e.error !== "no-speech" && e.error !== "aborted") {
+        toast("Mic error: " + e.error, true);
+      }
+    };
+    aiRec.onend = () => {
+      // Engine stopped on its own (long silence) — keep the text, just un-light the button
+      aiRecActive = false;
+      mic.classList.remove("rec");
+    };
+    try {
+      aiRec.start();
+      aiRecActive = true;
+      mic.classList.add("rec");
+    } catch (e) {
+      aiRecActive = false;
+      mic.classList.remove("rec");
+      toast("Couldn't start the mic: " + e.message, true);
+    }
   };
   if (input && !aiBusy) input.focus();
 }

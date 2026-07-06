@@ -323,6 +323,22 @@
   }
   .link-loc b { color: var(--text); }
 
+  /* Notes as a list — tap a note to open it bigger */
+  .note-list { display: flex; flex-direction: column; gap: 6px; }
+  .note-item {
+    display: flex; align-items: flex-start; gap: 8px;
+    background: var(--panel-2); border: 1px solid var(--panel-border);
+    border-radius: 8px; padding: 8px 10px; font-size: 13px;
+  }
+  .note-text {
+    flex: 1; cursor: pointer; min-width: 0;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .note-item.open { background: var(--panel); border-color: rgba(99,102,241,0.45); }
+  .note-item.open .note-text {
+    white-space: pre-wrap; overflow: visible; font-size: 14px; line-height: 1.55;
+  }
+
   /* Action buttons */
   .action-row { display: flex; gap: 8px; justify-content: flex-end; }
   .btn {
@@ -2035,11 +2051,24 @@ function billDetailsHtml(b) {
     `<option value="${f}" ${f === (b.frequency || "monthly") ? "selected" : ""}>${f === "once" ? "One-off" : f.charAt(0).toUpperCase()+f.slice(1)}</option>`
   ).join("");
   const linksHtml = (b.links || []).map((l, i) => linkBlockHtml(l, i)).join("");
+  const noteItems = (b.noteList && b.noteList.length) ? b.noteList : (b.notes ? [b.notes] : []);
+  const notesHtml = noteItems.map((n, i) => `
+    <div class="note-item" data-note-idx="${i}">
+      <span class="note-text" data-action="open-note">${escapeHtml(n)}</span>
+      <button class="icon-btn danger" data-action="del-note">×</button>
+    </div>`).join("");
   return `
     <div class="bill-details">
       <div class="field-row">
         <div class="field"><label>Company</label><input type="text" value="${escapeHtml(b.company || "")}" data-action="edit-company" /></div>
         <div class="field"><label>Website</label><input type="url" value="${escapeHtml(b.url || "")}" data-action="edit-url" placeholder="https://…" /></div>
+      </div>
+      <div class="field">
+        <label>Links</label>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          ${linksHtml}
+          <button class="btn" data-action="add-link">+ Add link</button>
+        </div>
       </div>
       <div class="field-row">
         <div class="field"><label>Amount</label><input type="number" step="0.01" value="${(Number(b.amount) || 0).toFixed(2)}" data-action="edit-amount" /></div>
@@ -2064,13 +2093,9 @@ function billDetailsHtml(b) {
       </div>
       <div class="field">
         <label>Notes</label>
-        <textarea data-action="edit-notes" placeholder="Personal notes…">${escapeHtml(b.notes || "")}</textarea>
-      </div>
-      <div class="field">
-        <label>Links</label>
-        <div style="display:flex;flex-direction:column;gap:6px">
-          ${linksHtml}
-          <button class="btn" data-action="add-link">+ Add link</button>
+        <div class="note-list">
+          ${notesHtml}
+          <input type="text" placeholder="Type a note + press Enter" data-action="add-note" />
         </div>
       </div>
       <div class="action-row">
@@ -2127,6 +2152,20 @@ function bindBillEvents(b) {
     if (action === "edit-email") el.onchange = () => updateBill(b.id, { email: el.value });
     if (action === "edit-address") el.onchange = () => updateBill(b.id, { address: el.value });
     if (action === "edit-notes") el.onblur = () => updateBill(b.id, { notes: el.value });
+    if (action === "add-note") el.onkeydown = (e) => {
+      if (e.key === "Enter" && el.value.trim()) {
+        const list = (b.noteList && b.noteList.length) ? [...b.noteList] : (b.notes ? [b.notes] : []);
+        list.push(el.value.trim());
+        updateBill(b.id, { noteList: list, notes: "" });
+        el.value = "";
+      }
+    };
+    if (action === "del-note") el.onclick = () => {
+      const i = parseInt(el.closest("[data-note-idx]").dataset.noteIdx);
+      const list = ((b.noteList && b.noteList.length) ? [...b.noteList] : (b.notes ? [b.notes] : [])).filter((_, idx) => idx !== i);
+      updateBill(b.id, { noteList: list, notes: "" });
+    };
+    if (action === "open-note") el.onclick = () => el.closest(".note-item").classList.toggle("open");
     if (action === "refetch") el.onclick = async () => {
       if (!b.url) return toast("No URL on this bill", true);
       await updateBill(b.id, { lookupStatus: "pending" });

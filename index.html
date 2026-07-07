@@ -453,7 +453,14 @@
     box-shadow: 0 0 0 2px rgba(99,102,241,0.55), 0 0 16px rgba(99,102,241,0.4);
   }
   .bill-enter-btn:hover { background: rgba(99,102,241,0.4); color: #ffffff; }
-  .bill-exit { margin-left: auto; padding: 10px 26px; font-size: 14px; }
+  .bill-exit {
+    margin-left: auto; padding: 2px 6px;
+    background: transparent; border: none; border-radius: 10px;
+    transition: transform 0.15s;
+  }
+  .bill-exit img { height: 52px; display: block; }
+  .bill-exit:hover { transform: scale(1.08); }
+  .bill-exit:active { transform: scale(0.95); }
   /* Keep the amount + paid circle clear of the Enter button */
   .bill:not(.expanded) .bill-amount,
   .bill:not(.expanded) .bill-pay-btn { margin-top: 44px; }
@@ -2153,7 +2160,7 @@ function billDetailsHtml(b) {
       <div class="action-row">
         <button class="btn" data-action="refetch">↻ Re-fetch from URL</button>
         <button class="btn danger" data-action="delete">Delete</button>
-        <button class="btn primary bill-exit" data-action="collapse">Exit</button>
+        <button class="bill-exit" data-action="collapse" title="Exit"><img src="exit-icon.svg" alt="Exit"/></button>
       </div>
     </div>
   `;
